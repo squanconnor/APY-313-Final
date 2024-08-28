@@ -1,0 +1,492 @@
+---
+title: "Utilization of Moving Averages for Stock Price Prediction"
+author: "Connor Walsh"
+date: "2024-05-04"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+
+
+The ability to predict stock prices with accuracy is a skill coveted among everyone in the finance world.  Although there are no perfect models that exist, perfection is not necessary to reap significant rewards.  In this data practical, I will be comparing the ability to predict trends in the stock market based on calculated simple and exponential moving averages.
+
+
+
+Our data pertains to 9 stocks, all of which are included in the S&P 500.  When selecting stocks, I focused on mainstream companies while also aiming to avoid any biases related to the proportion of the stock's portfolio size.  The stocks are listed below, and their rank in the S&P 500 based on portfolio size is included:
+
+**Largest Portfolio**
+
+* MSFT - Microsoft, Rank: 1
+
+* AAPL - Apple, Rank: 2
+
+* AMZN - Amazon, Rank: 4
+
+**Mid-sized Portfolio**
+
+* CMG - Chipotle, Rank: 100
+
+* TGT - Target, Rank: 116
+
+* PYPL - Paypal, Rank: 120
+
+**Smaller Portfolio**
+
+* RCL - Royal Caribbean, Rank: 255
+
+* DG - Dollar General, Rank: 268
+
+* HSY - Hershey Chocolate, Rank: 272
+
+
+
+
+The stock information was gathered from Yahoo Finance, and provides us with information such as closing value and volume from the past year (approximately May 2023 through May 2024).  The simple moving average and exponential moving average will need to be calculated independently.  There are libraries with functions that perform this for us, but an explanation of the calculations is:
+
+* **Simple Moving Average:** the sum of the closing price across a number of days, n, divided by n
+
+* **Exponential Moving Average:** the difference between the current closing price and the prior day's EMA, multiplied by (2/n+1), added to the prior day's EMA
+
+
+
+
+For calculating the moving averages, the duration will be set to 20 days.  This is a typical duration used in the finance industry for short to medium-term trend analysis.  
+
+
+
+The understanding of these averages, particularly how they compare in utility and accuracy, serves as the cornerstone of our investigation. However, the nature of two moving averages naturally raises a question: which one is better?
+
+#### *Primary Hypothesis:*
+Exponential Moving Average (EMA) will provide a more accurate prediction for stock price movements compared to Simple Moving Averages (SMA) over a 20-day period.
+
+##### *Primary Null Hypothesis:*
+There will be no consistent difference between the accuracy of stock price prediction calculated by EMA versus SMA.
+
+
+
+
+
+
+
+
+# Methods
+
+
+
+In order to test our hypothesis, we must first load our libraries.  We are using tidyverse, dplyr, TTR for calculating the moving averages, and Metrics for calculating error.  After, we must read our csv files and assign them to variables.  Once loaded in, the datasets must be cleaned.  Our important information is Date and Close (the closing price of the stock on the specific date).  We need R to recognize that the date is a date in time, and that close is numeric.
+
+
+
+
+
+#### Load Libraries
+```{r, message=FALSE}
+library(tidyverse)
+library(dplyr)
+library(TTR)
+library(Metrics)
+library(knitr)
+```
+
+
+
+
+
+#### Read Datasets
+```{r, message=FALSE}
+apple<- read_csv("AAPL.csv")
+amazon <- read_csv("AMZN.csv")
+microsoft <- read_csv("MSFT.csv")
+
+chipotle <- read_csv("CMG.csv")
+target <- read_csv("TGT.csv")
+paypal <- read_csv("PYPL.csv")
+
+# Royal Carribean
+royal <- read_csv("RCL.csv")
+# Dollar General
+dollar <- read_csv("DG.csv")
+hershey <- read_csv("HSY.csv")
+
+
+```
+Let's look at what these datasets look like
+```{r}
+head(apple)
+```
+
+
+
+
+
+#### Format our data
+```{r}
+# Because there are many datasets, we should create a function
+prep <- function(data) {
+  data$Date <- as.Date(data$Date)
+  data$Close <- as.numeric(data$Close)
+  
+  # na.omit() just to make sure our data is good
+  data <- na.omit(data)
+  return(data)
+}
+
+apple<- prep(apple)
+amazon <- prep(amazon)
+microsoft <- prep(microsoft)
+
+chipotle <- prep(chipotle)
+target <- prep(target)
+paypal <- prep(paypal)
+
+royal <- prep(royal)
+dollar <- prep(dollar)
+hershey <- prep(hershey)
+```
+
+
+
+
+
+Once our data is cleaned, we can begin making some calculations.  First, we will calculate our moving averages.  We will create a function that calculates both the simple and exponential moving average for a standard period of 20 days then apply it to each one of our datasets.
+
+
+
+
+
+#### Calculate Moving Averages
+```{r}
+# SMA = Short Moving Average
+# EMA = Exponential Moving Average
+calculate_ma <- function(data){
+  
+  sma_label <- paste("SMA", 20, sep = "_")
+  ema_label <- paste("EMA", 20, sep = "_")
+  
+  data <- data %>%
+    mutate(
+      !!sma_label := SMA(Close, n = 20),
+      !!ema_label := EMA(Close, n = 20)
+    )
+  
+  return(data)
+}
+
+apple<- calculate_ma(apple)
+amazon <- calculate_ma(amazon)
+microsoft <- calculate_ma(microsoft)
+
+chipotle <- calculate_ma(chipotle)
+target <- calculate_ma(target)
+paypal <- calculate_ma(paypal)
+
+royal <- calculate_ma(royal)
+dollar <- calculate_ma(dollar)
+hershey <- calculate_ma(hershey)
+
+```
+
+
+
+
+
+After calculating the moving averages, I will create a list of all the newly modified datasets that will be useful for calculating error.
+
+
+
+
+
+```{r}
+# The list below will come in handy for calculating the errors and volatility
+stock_list <- list(apple, amazon, microsoft, chipotle, target, paypal, royal, dollar, hershey)
+names(stock_list) <- c("apple", "amazon", "microsoft", "chipotle", "target", "paypal", "royal",
+                       "dollar", "hershey")
+```
+
+
+
+
+
+Next we will use these moving averages to calculate the error each share compared to the real closing price.  We will use two methods of measuring error:
+
+* **Mean Absolute Error (MAE):** calculated by taking the average of the absolute differences between the predicted values and the actual values
+
+* **Mean Squared Error (MSE):** calculated by taking the average of the squares of the absolute differences between the predicted values and the actual values.  This method puts more emphasis on larger differences.
+
+I chose these methods because the MAE is a very good baseline test and is less sensitive to outliers.  And MSE is good, especially with a topic like stocks, because one large error value can prove to be much more costly than occasional small errors.  The tests together can balance out each other's weaknesses to provide robust insight to our information.
+
+
+
+
+
+#### Calculate Error Functions
+```{r}
+calculate_mae <- function(data, stock_name) {
+  mae_sma <- mae(data$Close, data$SMA_20)
+  mae_ema <- mae(data$Close, data$EMA_20)
+  
+  results <- data.frame(
+    Stock = stock_name,
+    SMA = mae_sma,
+    EMA = mae_ema
+  )
+  return(results)
+}
+
+calculate_mse <- function(data, stock_name) {
+  mse_sma <- mse(data$Close, data$SMA_20)
+  mse_ema <- mse(data$Close, data$EMA_20)
+  
+  results <- data.frame(
+    Stock = stock_name,
+    SMA = mse_sma,
+    EMA = mse_ema
+  )
+  return(results)
+}
+
+```
+
+
+
+
+
+*Prior to running these functions, it is necessary to ensure that our datasets do not have NA values for either the EMA or SMA column.  Currently, every data set has their first 20 observations with NA values for our moving averages so we must clean again.  I will be using the stock_list defined above.*
+```{r, warning=FALSE}
+clean_data <- function(data) {
+  clean_data <- data[-(1:19), ] 
+  return(clean_data)
+}
+clean_stock_list <- lapply(stock_list, clean_data)
+
+mae_results <- do.call(rbind, lapply(names(clean_stock_list), function(x) calculate_mae(clean_stock_list[[x]], x)))
+
+mse_results <- do.call(rbind, lapply(names(clean_stock_list), function(x) calculate_mse(clean_stock_list[[x]], x)))
+
+# Print the results
+#print(mae_results)
+#print(mse_results)
+```
+
+
+
+# Results
+
+
+
+Below are visualizations of our data.  Each individual graph plots the closing price of the stock on a given day, as well as both calculated moving averages.  The moving averages are null for the first 20 days because calculating them has a prerequisite of 20 days worth of closing prices.  Therefore, the first calculated moving average is plotted on day 21.
+
+
+
+For the first graph, which happens to be Apple, I will only include the code to obtain the graph.  This code remains the same for the subsequent graphs with the exception of the titles.  Additionally for the first graph, the true output of the code has been replaced by an annotation version of this graph.  This annotated version will be used to aid in my explanation of how to read moving averages.
+
+
+
+#### Visualize the Moving Averages
+```{r, warning=FALSE, fig.show='hide'}
+ggplot(apple, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Apple Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+```{r, echo=FALSE}
+knitr::include_graphics('AppleGraph.png')
+```
+
+
+
+Above is the visualization for Apple.  The black line represents the closing price of the stock, the red line is the exponential moving average, and the blue line is the simple moving averages.  All of the rectangles are my annotations.  How do investors use moving averages to make predictions about the future price of the stock?  This is a very important question.
+
+
+
+When calculating these graphs, it is important to remember that all 3 lines stop at present day.  Although moving averages are used in predicting, the lines do not extend into the future, leaving investors to have to make interpretations.  One important interpretation of the moving averages is in regards to support and resistance.  When a stock price is falling, the price may find difficulty dropping below the moving average.  Examples of this are labeled with the light blue rectangles in the annotated visualization.  The opposite can be true for when the stock price is trying to rise.  It may approach the moving averages and face "resistance".  Our annotated visualization has multiple examples of resistance within the large red rectangle.  Aside from support and resistance, an investor may look at where price is relative to a moving average.  Price above a moving average, especially if the moving average has a large duration, is considered bullish.
+
+
+
+Investors will also plot moving averages of varying durations on the same plot for making predictions.  If a moving average with a small duration crosses above a moving average with a large duration (if short term intersects long term from low to high) then this is considered bullish.  For anyone unfamiliar, bullish refers to a profitable market, prompting more investments.  Conversely, if a short term moving average fall below a long term moving average, than the market in bearish (meaning the opposite of bullish).  This was not included in this data practical due to the scope of the hypothesis.
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(amazon, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Amazon Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(microsoft, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Microsoft Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(chipotle, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Chipotle Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(target, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Target Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(paypal, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Paypal Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(royal, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Royal Caribbean Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(dollar, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Dollar General Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(hershey, aes(x = Date)) +
+  geom_line(aes(y = Close, colour = "Close Price")) +
+  geom_line(aes(y = SMA_20, colour = "20-Day SMA")) +
+  geom_line(aes(y = EMA_20, colour = "20-Day EMA")) +
+  labs(title = "Hershey Stock Price and Moving Averages", y = "Price (USD)") +
+  scale_colour_manual("Legend", 
+                      values = c("Close Price" = "black", "20-Day SMA" = "blue", "20-Day EMA" = "red")) +
+  theme_minimal()
+```
+
+
+
+When reviewing all of these graphs, it seems clear that the exponential moving averages, depicted by the red lines, are much more accurate than the simple moving average.  However, sometimes visualizations can be misleading.  Below are the tables calculated by our error function.
+
+
+
+#### Mean Abosolute Error Table
+```{r}
+mae_results |> kable()
+```
+
+
+
+#### Mean Squared Error Table
+```{r}
+mse_results |> kable()
+```
+
+
+
+For error calculations like this, the larger the number the greater the error.  Zero for either statistic means that there is no calculated error.  Both of these tables show resounding support for exponential moving average being more accurate than simple moving average.
+
+
+
+# Discussion
+
+
+
+In conclusion, it is clear to see that exponential moving averages are more accurate than simple moving averages.  The tables show that every one of our 9 stocks are evidence of EMA being more accurate than SMA.  Some stocks had really similar moving averages, like Amazon and Hershey.  But there was not one example of a stock who's 20 day simple moving average was more accurate than its 20 day exponential moving average.
+
+
+
+A question raised by this conclusion is: does volatility of a stock affect the difference in accuracy between the EMA AND SMA.  I chose 9 stocks that were all large and not very volatile for the sake of familiarity.  By doing this, I may have created a bias against volatile stocks.  Our smallest stock was Hershey, which is massive in comparison to other stocks on the market.  If this experiment were to be done again, I would include small, volatile stocks with the goal of comparing SMA and EMA accuracy then.
+
+
+
+Lastly, just because EMA is seemingly more accurate than SMA, does not make SMA useless.  At the very least, SMA is a simple, easy calculation to make where as EMA is far more complex.  SMA could allow for greater comprehension of the statistic or computation by hand.
+
+
+
+## References
+
+**R Package Citations:**
+
+```{r, echo=FALSE, results='asis'}
+library(tidyverse)
+library(dplyr)
+library(TTR)
+library(Metrics)
+library(knitr)
+library(purrr)
+
+c("tidyverse", "dplyr", "TTR", "Metrics", "knitr", "purrr") %>%
+  map(citation) %>%
+  print(style = "text")
+
+
+```
+
+
+
+**Web Sources:**
+
+
+
+* Yahoo Finance. (n.d.). Retrieved from https://finance.yahoo.com
+
+
+
+* S&P 500 Companies. (n.d.). Retrieved from https://www.slickcharts.com/sp500
